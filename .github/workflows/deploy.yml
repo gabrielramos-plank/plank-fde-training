@@ -1,0 +1,55 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Environment to deploy to
+        type: choice
+        required: true
+        default: pre-prod
+        options:
+          - pre-prod
+          - prod
+
+concurrency:
+  group: deploy-${{ inputs.env }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.env }}
+    runs-on: ubuntu-latest
+    # Uses the GitHub Environment of the same name (secrets, protection rules)
+    environment:
+      name: ${{ inputs.env }}
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      # prod -> Vercel Production, pre-prod -> Vercel Preview
+      VERCEL_TARGET: ${{ inputs.env == 'prod' && 'production' || 'preview' }}
+      VERCEL_PROD_FLAG: ${{ inputs.env == 'prod' && '--prod' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel settings and env vars
+        run: vercel pull --yes --environment=$VERCEL_TARGET --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build $VERCEL_PROD_FLAG --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        id: deploy
+        run: |
+          url=$(vercel deploy --prebuilt $VERCEL_PROD_FLAG --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed ${{ inputs.env }}: $url" >> "$GITHUB_STEP_SUMMARY"
